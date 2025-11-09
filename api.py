@@ -25,26 +25,6 @@ from ab_test import (
     get_completion_time_distribution
 )
 
-# Simple in-memory cache
-_cache = {
-    'stats': {'data': None, 'expires': 0},
-    'comparison': {'data': None, 'expires': 0}
-}
-
-
-def get_cached(key, func, ttl=20):
-    """Get from cache or call function if expired"""
-    cache_entry = _cache.get(key, {})
-    if cache_entry.get('data') and time.time() < cache_entry.get('expires', 0):
-        return cache_entry['data']
-    
-    data = func()
-    _cache[key] = {
-        'data': data,
-        'expires': time.time() + ttl
-    }
-    return data
-
 app = FastAPI(
     title="SOMA Analytics API",
     description="Real-time analytics for SOMA projects",
@@ -110,9 +90,9 @@ def health():
 def variant_stats():
     """
     Get aggregated statistics for each variant (A/B).
-    Cached for 5 seconds to reduce database load.
+    Real-time data, no caching.
     """
-    return get_cached('stats', get_variant_stats, ttl=5)
+    return get_variant_stats()
 
 
 @app.get("/api/conversion-funnel")
@@ -145,9 +125,9 @@ def recent_completions(limit: int = 100):
 def comparison():
     """
     Get comparison metrics between variant A and B.
-    Cached for 5 seconds to reduce database load.
+    Real-time data, no caching.
     """
-    return get_cached('comparison', get_comparison_metrics, ttl=5)
+    return get_comparison_metrics()
 
 
 @app.get("/api/time-distribution")

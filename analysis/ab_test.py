@@ -112,12 +112,13 @@ def get_recent_completions(limit=100):
     engine = get_db_connection()
     query = f"""
         SELECT
-            variant,
-            completion_time_seconds,
-            correct_words_count,
-            total_guesses_count,
-            timestamp,
-            user_id
+            variant as "Variant",
+            completion_time_seconds as "Time to Complete",
+            correct_words_count as "Correct Words",
+            total_guesses_count as "Total Guesses",
+            TO_CHAR(timestamp AT TIME ZONE 'America/Los_Angeles', 'YYYY-MM-DD HH24:MI:SS') AS When,
+            properties ->> '$geoip_city_name' as City, 
+            properties ->> '$geoip_country_name' as Country
         FROM posthog_events
         WHERE event = 'puzzle_completed'
           AND completion_time_seconds IS NOT NULL
@@ -197,25 +198,11 @@ def get_comparison_metrics():
     time_diff = variant_b['avg_completion_time'] - variant_a['avg_completion_time']
     pct_diff = (time_diff / variant_a['avg_completion_time'] * 100) if variant_a['avg_completion_time'] > 0 else 0
 
-    # Interpret the difference
-    if abs(pct_diff) > 20:
-        if pct_diff > 0:
-            interpretation = "🔴 Variant B is significantly harder (+20% time)"
-        else:
-            interpretation = "🟢 Variant B is surprisingly easier (-20% time)"
-    elif abs(pct_diff) > 10:
-        interpretation = "🟡 Moderate difficulty difference (10-20%)"
-    else:
-        interpretation = "⚪ Similar difficulty (<10% difference)"
-
     return {
         "time_difference_seconds": round(time_diff, 2),
         "percentage_difference": round(pct_diff, 1),
-        "interpretation": interpretation,
         "variant_a_avg": round(variant_a['avg_completion_time'], 2),
         "variant_b_avg": round(variant_b['avg_completion_time'], 2),
-        "variant_a_median": round(variant_a['median_completion_time'], 2),
-        "variant_b_median": round(variant_b['median_completion_time'], 2),
         "variant_a_completions": int(variant_a['total_completions']),
         "variant_b_completions": int(variant_b['total_completions'])
     }
