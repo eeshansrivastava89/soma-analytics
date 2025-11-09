@@ -9,24 +9,44 @@ Think of this like notebook cells converted to functions.
 
 import os
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, pool
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
+# Create a single engine instance with connection pooling
+_engine = None
+
 
 def get_db_connection():
     """
-    Create database connection from environment variable.
+    Get database connection with connection pooling.
 
     Returns:
         SQLAlchemy engine connected to Supabase PostgreSQL
     """
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        raise ValueError("DATABASE_URL environment variable not set in .env")
-    return create_engine(db_url)
+    global _engine
+    
+    if _engine is None:
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            raise ValueError("DATABASE_URL environment variable not set in .env")
+        
+        # Use connection pooling to handle concurrent requests
+        # pool_size: number of connections to keep in pool
+        # max_overflow: additional connections beyond pool_size
+        # pool_recycle: recycle connections after 3600 seconds (Supabase default)
+        _engine = create_engine(
+            db_url,
+            poolclass=pool.QueuePool,
+            pool_size=5,
+            max_overflow=10,
+            pool_recycle=3600,
+            pool_pre_ping=True  # Test connections before using them
+        )
+    
+    return _engine
 
 
 def get_variant_stats():
@@ -111,6 +131,36 @@ def get_recent_completions(limit=100):
         df['timestamp'] = df['timestamp'].astype(str)
 
     return df.to_dict(orient='records')
+
+
+def get_completion_time_distribution():
+    """
+    Load all completion times for KDE/histogram visualization.
+
+    Returns:
+        dict: Distribution data with keys:
+            - variant_a_times: list of completion times for variant A
+            - variant_b_times: list of completion times for variant B
+    """
+    engine = get_db_connection()
+    query = """
+        SELECT
+            variant,
+            completion_time_seconds
+        FROM posthog_events
+        WHERE event = 'puzzle_completed'
+          AND completion_time_seconds IS NOT NULL
+        ORDER BY variant, completion_time_seconds
+    """
+    df = pd.read_sql(query, engine)
+
+    variant_a_times = df[df['variant'] == 'A']['completion_time_seconds'].tolist()
+    variant_b_times = df[df['variant'] == 'B']['completion_time_seconds'].tolist()
+
+    return {
+        "variant_a_times": variant_a_times,
+        "variant_b_times": variant_b_times
+    }
 
 
 def get_comparison_metrics():

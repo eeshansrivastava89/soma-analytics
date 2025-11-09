@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 import sys
 import os
+import time
+from functools import wraps
 
 # Add analysis module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'analysis'))
@@ -19,8 +21,29 @@ from ab_test import (
     get_variant_stats,
     get_conversion_funnel,
     get_recent_completions,
-    get_comparison_metrics
+    get_comparison_metrics,
+    get_completion_time_distribution
 )
+
+# Simple in-memory cache
+_cache = {
+    'stats': {'data': None, 'expires': 0},
+    'comparison': {'data': None, 'expires': 0}
+}
+
+
+def get_cached(key, func, ttl=20):
+    """Get from cache or call function if expired"""
+    cache_entry = _cache.get(key, {})
+    if cache_entry.get('data') and time.time() < cache_entry.get('expires', 0):
+        return cache_entry['data']
+    
+    data = func()
+    _cache[key] = {
+        'data': data,
+        'expires': time.time() + ttl
+    }
+    return data
 
 app = FastAPI(
     title="SOMA Analytics API",
@@ -36,6 +59,25 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+def retry_on_failure(retries=2, delay=0.5):
+    """Retry decorator for transient database failures"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < retries - 1:
+                        time.sleep(delay)
+                    continue
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 @app.get("/")
@@ -64,32 +106,28 @@ def health():
 
 
 @app.get("/api/variant-stats")
+@retry_on_failure(retries=2, delay=0.5)
 def variant_stats():
     """
     Get aggregated statistics for each variant (A/B).
-
-    Returns list of variant stats with completion times, user counts, percentiles.
+    Cached for 5 seconds to reduce database load.
     """
-    try:
-        return get_variant_stats()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return get_cached('stats', get_variant_stats, ttl=5)
 
 
 @app.get("/api/conversion-funnel")
+@retry_on_failure(retries=2, delay=0.5)
 def conversion_funnel():
     """
     Get conversion funnel data (Started → Completed → Repeated).
 
     Returns list of funnel stages with event counts and user counts.
     """
-    try:
-        return get_conversion_funnel()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return get_conversion_funnel()
 
 
 @app.get("/api/recent-completions")
+@retry_on_failure(retries=2, delay=0.5)
 def recent_completions(limit: int = 100):
     """
     Get recent puzzle completions.
@@ -97,25 +135,29 @@ def recent_completions(limit: int = 100):
     Query params:
         limit: Number of recent completions to return (default: 100, max: 500)
     """
-    try:
-        if limit > 500:
-            limit = 500
-        return get_recent_completions(limit=limit)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if limit > 500:
+        limit = 500
+    return get_recent_completions(limit=limit)
 
 
 @app.get("/api/comparison")
+@retry_on_failure(retries=2, delay=0.5)
 def comparison():
     """
     Get comparison metrics between variant A and B.
-
-    Returns time difference, percentage difference, and interpretation.
+    Cached for 5 seconds to reduce database load.
     """
-    try:
-        return get_comparison_metrics()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return get_cached('comparison', get_comparison_metrics, ttl=5)
+
+
+@app.get("/api/time-distribution")
+@retry_on_failure(retries=2, delay=0.5)
+def time_distribution():
+    """
+    Get raw completion times for KDE/histogram visualization.
+    Returns all completion times for both variants.
+    """
+    return get_completion_time_distribution()
 
 
 # Run with: python api.py
