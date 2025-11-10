@@ -208,6 +208,41 @@ def get_comparison_metrics():
     }
 
 
+def get_leaderboard(variant='A', limit=10):
+    """
+    Get top players by best completion time for a variant.
+    
+    Args:
+        variant: 'A' or 'B' (default 'A')
+        limit: Number of top players to return (default 10)
+    
+    Returns:
+        list of dict: Top players with keys:
+            - username: player username
+            - best_time: best completion time in seconds
+            - total_completions: number of times completed
+    """
+    engine = get_db_connection()
+    query = """
+        SELECT 
+          properties->>'username' as username,
+          MIN(completion_time_seconds) as best_time,
+          COUNT(*) as total_completions
+        FROM posthog_events 
+        WHERE event = 'puzzle_completed' 
+          AND variant = %s
+          AND properties->>'username' IS NOT NULL
+          AND completion_time_seconds IS NOT NULL
+        GROUP BY properties->>'username'
+        ORDER BY best_time ASC
+        LIMIT %s
+    """
+    df = pd.read_sql(query, engine, params=(variant, limit))
+    
+    # Convert to list of dicts for JSON serialization
+    return df.to_dict(orient='records')
+
+
 # For testing: Run this file directly to see sample output
 if __name__ == "__main__":
     print("Testing analysis functions...\n")

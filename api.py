@@ -22,7 +22,8 @@ from ab_test import (
     get_conversion_funnel,
     get_recent_completions,
     get_comparison_metrics,
-    get_completion_time_distribution
+    get_completion_time_distribution,
+    get_leaderboard
 )
 
 app = FastAPI(
@@ -70,7 +71,8 @@ def root():
             "/api/variant-stats",
             "/api/conversion-funnel",
             "/api/recent-completions",
-            "/api/comparison"
+            "/api/comparison",
+            "/api/leaderboard"
         ],
         "docs": "/docs"
     }
@@ -138,6 +140,26 @@ def time_distribution():
     Returns all completion times for both variants.
     """
     return get_completion_time_distribution()
+
+
+@app.get("/api/leaderboard")
+@retry_on_failure(retries=2, delay=0.5)
+def leaderboard(variant: str = 'A', limit: int = 10):
+    """
+    Get global leaderboard of top players by best completion time.
+    
+    Query params:
+        variant: 'A' or 'B' (default: 'A')
+        limit: Number of top players (default: 10, max: 50)
+    """
+    if variant not in ['A', 'B']:
+        raise HTTPException(status_code=400, detail="variant must be 'A' or 'B'")
+    if limit > 50:
+        limit = 50
+    if limit < 1:
+        limit = 10
+    
+    return get_leaderboard(variant=variant, limit=limit)
 
 
 # Run with: python api.py
