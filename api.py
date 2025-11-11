@@ -33,9 +33,18 @@ app = FastAPI(
 )
 
 # Enable CORS for Astro site to fetch data
+# CORS configuration: restrict in production while allowing local dev
+ALLOWED_ORIGINS = [
+    "https://eeshans.com",          # production portfolio domain
+    "http://localhost:4321",        # local Astro dev server default
+    "http://localhost:8000",        # local analytics direct calls
+    "http://127.0.0.1:4321",        # loopback variant
+    "http://127.0.0.1:8000"         # loopback analytics
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to your domain
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET"],
     allow_headers=["*"],
@@ -69,6 +78,7 @@ def root():
         "version": "1.0.0",
         "endpoints": [
             "/api/variant-stats",
+            "/api/variant-overview",
             "/api/conversion-funnel",
             "/api/recent-completions",
             "/api/comparison",
@@ -130,6 +140,24 @@ def comparison():
     Real-time data, no caching.
     """
     return get_comparison_metrics()
+
+
+@app.get("/api/variant-overview")
+@retry_on_failure(retries=2, delay=0.5)
+def variant_overview():
+    """
+    Coalesced endpoint combining variant stats and comparison metrics.
+
+    Returns:
+        dict: {
+            "stats": [...],            # from get_variant_stats()
+            "comparison": {...}       # from get_comparison_metrics()
+        }
+    """
+    return {
+        "stats": get_variant_stats(),
+        "comparison": get_comparison_metrics()
+    }
 
 
 @app.get("/api/time-distribution")
